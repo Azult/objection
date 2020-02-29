@@ -1,8 +1,8 @@
 import click
+import frida
 
-from objection.utils.frida_transport import FridaRunner
+from objection.state.connection import state_connection
 from objection.utils.helpers import clean_argument_flags
-from objection.utils.templates import android_hook
 
 
 def _string_is_true(s: str) -> bool:
@@ -57,21 +57,14 @@ def show_android_classes(args: list = None) -> None:
         :return:
     """
 
-    hook = android_hook('hooking/list-classes')
-    runner = FridaRunner(hook=hook)
-    runner.run()
-
-    response = runner.get_last_message()
-
-    if not response.is_successful():
-        click.secho('Failed to list classes with error: {0}'.format(response.error_reason), fg='red')
-        return None
+    api = state_connection.get_api()
+    classes = api.android_hooking_get_classes()
 
     # print the enumerated classes
-    for class_name in sorted(response.data):
+    for class_name in sorted(classes):
         click.secho(class_name)
 
-    click.secho('\nFound {0} classes'.format(len(response.data)), bold=True)
+    click.secho('\nFound {0} classes'.format(len(classes)), bold=True)
 
 
 def show_android_class_methods(args: list = None) -> None:
@@ -88,21 +81,14 @@ def show_android_class_methods(args: list = None) -> None:
 
     class_name = args[0]
 
-    runner = FridaRunner()
-    runner.set_hook_with_data(android_hook('hooking/list-class-methods'), class_name=class_name)
-
-    runner.run()
-    response = runner.get_last_message()
-
-    if not response.is_successful():
-        click.secho('Failed to list class methods with error: {0}'.format(response.error_reason), fg='red')
-        return None
+    api = state_connection.get_api()
+    methods = api.android_hooking_get_class_methods(class_name)
 
     # print the enumerated classes
-    for class_name in sorted(response.data):
+    for class_name in sorted(methods):
         click.secho(class_name)
 
-    click.secho('\nFound {0} method(s)'.format(len(response.data)), bold=True)
+    click.secho('\nFound {0} method(s)'.format(len(methods)), bold=True)
 
 
 def watch_class(args: list) -> None:
@@ -116,22 +102,13 @@ def watch_class(args: list) -> None:
 
     if len(clean_argument_flags(args)) < 1:
         click.secho('Usage: android hooking watch class <class> '
-                    '(eg: com.example.test) '
-                    '(optional: --dump-args) '
-                    '(optional: --dump-backtrace) '
-                    '(optional: --dump-return)', bold=True)
+                    '(eg: com.example.test)', bold=True)
         return
 
     target_class = args[0]
 
-    runner = FridaRunner()
-    runner.set_hook_with_data(android_hook('hooking/watch-class-methods'),
-                              target_class=target_class,
-                              dump_args=_should_dump_args(args),
-                              dump_return=_should_dump_return_value(args),
-                              dump_backtrace=_should_dump_backtrace(args))
-
-    runner.run_as_job(name='watch-java-class', args=args)
+    api = state_connection.get_api()
+    api.android_hooking_watch_class(target_class)
 
 
 def watch_class_method(args: list) -> None:
@@ -146,27 +123,25 @@ def watch_class_method(args: list) -> None:
         :return:
     """
 
-    if len(clean_argument_flags(args)) < 2:
-        click.secho(('Usage: android hooking watch class_method <class> <method> '
-                     '(eg: com.example.test dologin) '
+    if len(clean_argument_flags(args)) < 1:
+        click.secho(('Usage: android hooking watch class_method <fully qualified class method> '
+                     '<optional overload> '
                      '(optional: --dump-args) '
                      '(optional: --dump-backtrace) '
                      '(optional: --dump-return)'), bold=True)
         return
 
-    target_class = args[0]
-    target_method = args[1]
+    fully_qualified_class = args[0]
+    overload_filter = args[1].replace(' ', '') if '--' not in args[1] else None
 
-    runner = FridaRunner()
+    api = state_connection.get_api()
+    api.android_hooking_watch_method(fully_qualified_class,
+                                     overload_filter,
+                                     _should_dump_args(args),
+                                     _should_dump_backtrace(args),
+                                     _should_dump_return_value(args))
 
-    runner.set_hook_with_data(android_hook('hooking/watch-method'),
-                              target_class=target_class,
-                              target_method=target_method,
-                              dump_args=_should_dump_args(args),
-                              dump_return=_should_dump_return_value(args),
-                              dump_backtrace=_should_dump_backtrace(args))
-
-    runner.run_as_job(name='watch-java-method', args=args)
+    return
 
 
 def show_registered_broadcast_receivers(args: list = None) -> None:
@@ -177,24 +152,13 @@ def show_registered_broadcast_receivers(args: list = None) -> None:
         :return:
     """
 
-    hook = android_hook('hooking/list-broadcast-receivers')
-    runner = FridaRunner(hook=hook)
-    runner.run()
+    api = state_connection.get_api()
+    receivers = api.android_hooking_list_broadcast_receivers()
 
-    response = runner.get_last_message()
-
-    if not response.is_successful():
-        click.secho('Failed to list broadcast receivers with error: {0}'.format(response.error_reason), fg='red')
-        return None
-
-    if not response.data:
-        click.secho('No broadcast receivers were found', fg='yellow')
-        return None
-
-    for class_name in sorted(response.data):
+    for class_name in sorted(receivers):
         click.secho(class_name)
 
-    click.secho('\nFound {0} classes'.format(len(response.data)), bold=True)
+    click.secho('\nFound {0} classes'.format(len(receivers)), bold=True)
 
 
 def show_registered_services(args: list = None) -> None:
@@ -205,24 +169,13 @@ def show_registered_services(args: list = None) -> None:
         :return:
     """
 
-    hook = android_hook('hooking/list-services')
-    runner = FridaRunner(hook=hook)
-    runner.run()
+    api = state_connection.get_api()
+    services = api.android_hooking_list_services()
 
-    response = runner.get_last_message()
-
-    if not response.is_successful():
-        click.secho('Failed to list services with error: {0}'.format(response.error_reason), fg='red')
-        return None
-
-    if not response.data:
-        click.secho('No services were found', fg='yellow')
-        return None
-
-    for class_name in sorted(response.data):
+    for class_name in sorted(services):
         click.secho(class_name)
 
-    click.secho('\nFound {0} classes'.format(len(response.data)), bold=True)
+    click.secho('\nFound {0} classes'.format(len(services)), bold=True)
 
 
 def show_registered_activities(args: list = None) -> None:
@@ -233,24 +186,28 @@ def show_registered_activities(args: list = None) -> None:
         :return:
     """
 
-    hook = android_hook('hooking/list-activities')
-    runner = FridaRunner(hook=hook)
-    runner.run()
+    api = state_connection.get_api()
+    activities = api.android_hooking_list_activities()
 
-    response = runner.get_last_message()
-
-    if not response.is_successful():
-        click.secho('Failed to list activities with error: {0}'.format(response.error_reason), fg='red')
-        return None
-
-    if not response.data:
-        click.secho('No activities were found', fg='yellow')
-        return None
-
-    for class_name in sorted(response.data):
+    for class_name in sorted(activities):
         click.secho(class_name)
 
-    click.secho('\nFound {0} classes'.format(len(response.data)), bold=True)
+    click.secho('\nFound {0} classes'.format(len(activities)), bold=True)
+
+
+def get_current_activity(args: list = None) -> None:
+    """
+        Get the currently active activity
+
+        :param args:
+        :return:
+    """
+
+    api = state_connection.get_api()
+    activity = api.android_hooking_get_current_activity()
+
+    click.secho('Activity: {0}'.format(activity['activity']), bold=True)
+    click.secho('Fragment: {0}'.format(activity['fragment']))
 
 
 def set_method_return_value(args: list = None) -> None:
@@ -263,27 +220,31 @@ def set_method_return_value(args: list = None) -> None:
 
     if len(clean_argument_flags(args)) < 2:
         click.secho(('Usage: android hooking set return_value '
-                     '"<fully qualified class>" (eg: "com.example.test") '
-                     '"<method (with overload if needed)>" (eg: see help for details) '
+                     '"<fully qualified class method>" "<optional overload>" (eg: "com.example.test.doLogin") '
                      '<true/false>'),
                     bold=True)
         return
 
-    class_name = args[0]
-    method_name = args[1].replace('\'', '"')  # fun!
-    retval = args[2]
+    # make sure we got a true/false
+    if args[-1].lower() not in ('true', 'false'):
+        click.secho('Return value must be set to either true or false', bold=True)
+        return
 
-    runner = FridaRunner()
-    runner.set_hook_with_data(
-        android_hook('hooking/set-return'), class_name=class_name, method_name=method_name, retval=retval)
+    class_name = args[0].replace('\'', '"')  # fun!
 
-    runner.run_as_job(name='set-return-value', args=args)
+    # check if we got an overload
+    overload_filter = args[1].replace(' ', '') if len(args) == 3 else None
+    retval = True if _string_is_true(args[-1]) else False
+
+    api = state_connection.get_api()
+    api.android_hooking_set_method_return(class_name,
+                                          overload_filter,
+                                          retval)
 
 
 def search_class(args: list) -> None:
     """
-        Searches the current Android application for instances
-        of a class.
+        Searches the current Android application for a class.
 
         :param args:
         :return:
@@ -294,24 +255,138 @@ def search_class(args: list) -> None:
         return
 
     search = args[0]
+    found = 0
 
-    runner = FridaRunner()
-    runner.set_hook_with_data(android_hook('hooking/search-class'), search=search)
-    runner.run()
+    api = state_connection.get_api()
+    classes = api.android_hooking_get_classes()
 
-    response = runner.get_last_message()
+    # print the enumerated classes
+    for class_name in sorted(classes):
 
-    if not response.is_successful():
-        click.secho('Failed to search for classes with error: {0}'.format(response.error_reason), fg='red')
-        return None
+        if search.lower() in class_name.lower():
+            click.secho(class_name)
+            found += 1
 
-    if response.data:
+    click.secho('\nFound {0} classes'.format(found), bold=True)
 
-        # dump the classes to screen
-        for classname in response.data:
-            click.secho(classname)
 
-        click.secho('\nFound {0} classes'.format(len(response.data)), bold=True)
+def search_methods(args: list) -> None:
+    """
+        Searches the current Android application for a class method.
 
-    else:
-        click.secho('No classes found')
+        :param args:
+        :return:
+    """
+
+    if len(clean_argument_flags(args)) < 1:
+        click.secho('Usage: android hooking search methods <name> (optional: <package-filter>)', bold=True)
+        return
+
+    search = args[0]
+    class_filter = args[1] if len(clean_argument_flags(args)) > 1 else None
+    found = 0
+
+    if not class_filter:
+        click.secho('Warning, searching all classes may take some time and in some cases, '
+                    'crash the target application.', fg='yellow')
+        if not click.confirm('Continue?'):
+            return
+
+    api = state_connection.get_api()
+
+    # get the classes we have
+    classes = api.android_hooking_get_classes()
+    click.secho('Found {0} classes, searching methods (this may take some time)...'.format(len(classes)), dim=True)
+    if class_filter:
+        click.secho('Filtering classes with {0}'.format(class_filter), dim=True)
+
+    # loop the classes and check the methods
+    for class_name in sorted(classes):
+        if class_filter and class_filter.lower() not in class_name.lower():
+            continue
+
+        try:
+
+            for method in api.android_hooking_get_class_methods(class_name):
+                # get only the raw method, minus returns, throws and args
+                method = method.split('(')[0].split(' ')[-1]
+                if search.lower() in method.lower():
+                    click.secho(method)
+                    found += 1
+
+        except frida.core.RPCException as e:
+            click.secho('Enumerating methods for class \'{0}\' failed with: {1}'.format(class_name, e), fg='red',
+                        dim=True)
+            click.secho('Ignoring error and continuing search...', dim=True)
+
+    click.secho('\nFound {0} methods'.format(found), bold=True)
+
+
+
+#New Ilia
+def search_var(args: list) -> None:
+    """
+        Hook all the classes and methods matching the pattern
+        and scan for the argument value.
+
+        :param args:
+        :return:
+    """
+
+    if len(clean_argument_flags(args)) < 1:
+        click.secho('Usage: android hooking search var <var-filter> <package-filter> (optional: <method-filter>)', bold=True)
+        return
+
+    var_filter = args[0]
+    class_filter = args[1]
+    method_filter = args[2] if len(clean_argument_flags(args)) > 2 else None
+    found = 0
+
+    click.secho('Warning, performing this hook may take some time and in some cases, '
+                    'crash the target application.', fg='yellow')
+    if not click.confirm('Continue?'):
+        return
+
+    api = state_connection.get_api()
+    # retret = True
+    # api.android_hooking_search_var_value(class_filter,
+    #                                       method_filter,
+    #                                       retret)
+
+
+    # get the classes we have
+    classes = api.android_hooking_get_classes()
+    click.secho('Found {0} classes, searching methods (this may take some time)...'.format(len(classes)), dim=True)
+    click.secho('Filtering classes with {0}'.format(class_filter), dim=True)
+        
+
+    
+    # if method_filter:
+    #     click.secho('Filtering classes with {0}'.format(class_filter), dim=True)
+
+
+
+    # loop the classes and check the methods
+
+    for class_name in sorted(classes):
+        if class_filter and class_filter.lower() not in class_name.lower():
+            continue
+
+        try:
+
+            for method in api.android_hooking_get_class_methods(class_name):
+                # get only the raw method, minus returns, throws and args
+                check_method = method.split('(')[0].split(' ')[-1]
+                method = method.split('(')[0].split(' ')[-1]
+                if method_filter:
+                    if method_filter.lower() not in check_method.lower():
+                        continue
+                print(method)
+                api.android_hooking_search_var_value(method,var_filter)
+
+        except frida.core.RPCException as e:
+            click.secho('Enumerating methods for class \'{0}\' failed with: {1}'.format(class_name, e), fg='red',
+                        dim=True)
+            click.secho('Ignoring error and continuing search...', dim=True)
+
+    # click.secho('\nFound {0} methods'.format(found), bold=True)

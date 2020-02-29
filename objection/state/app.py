@@ -3,6 +3,9 @@ class AppState(object):
 
     def __init__(self):
         self.debug_hooks = False
+        self.debug = False
+        self.api_host = '127.0.0.1'
+        self.api_port = 8888
         self.successful_commands = []
 
     def add_command_to_history(self, command: str) -> None:
@@ -34,6 +37,16 @@ class AppState(object):
         """
 
         return self.debug_hooks
+
+    def should_debug(self) -> bool:
+        """
+
+            Checks if debugging is enabled
+
+            :return:
+        """
+
+        return self.debug
 
 
 app_state = AppState()

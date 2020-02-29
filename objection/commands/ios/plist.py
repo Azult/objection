@@ -3,8 +3,8 @@ import os
 import click
 
 from objection.commands import filemanager
-from objection.utils.frida_transport import FridaRunner
-from objection.utils.templates import ios_hook
+from objection.state.connection import state_connection
+from objection.state.device import device_state
 
 
 def cat(args: list = None) -> None:
@@ -24,16 +24,9 @@ def cat(args: list = None) -> None:
 
     if not os.path.isabs(plist):
         pwd = filemanager.pwd()
-        plist = os.path.join(pwd, plist)
+        plist = device_state.device_type.path_seperator.join([pwd, plist])
 
-    runner = FridaRunner()
-    runner.set_hook_with_data(ios_hook('plist/get'), plist=plist)
-    runner.run()
+    api = state_connection.get_api()
+    plist_data = api.ios_plist_read(plist)
 
-    response = runner.get_last_message()
-
-    if not response.is_successful():
-        click.secho('Failed to get plist with error: {0}'.format(response.error_reason), fg='red')
-        return
-
-    click.secho(response.data, bold=True)
+    click.secho(plist_data, bold=True)

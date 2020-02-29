@@ -1,12 +1,12 @@
 import os
+import json
 
 import click
 from tabulate import tabulate
 
-from ..utils.frida_transport import FridaRunner
+from objection.state.connection import state_connection
 from ..utils.helpers import clean_argument_flags
 from ..utils.helpers import sizeof_fmt, pretty_concat
-from ..utils.templates import generic_hook
 
 
 def _is_string_input(args: list) -> bool:
@@ -19,6 +19,29 @@ def _is_string_input(args: list) -> bool:
     """
 
     return len(args) > 0 and '--string' in args
+
+
+def _should_only_dump_offsets(args: list) -> bool:
+    """
+        Checks if --offsets-only is in the list pf tokens received
+        from the command line.
+
+        :param args:
+        :return:
+    """
+
+    return '--offsets-only' in args
+
+
+def _should_output_json(args: list) -> bool:
+    """
+        Checks if --json is in the list of tokens received from the command line.
+
+        :param args:
+        :return:
+    """
+
+    return len(args) > 0 and '--json' in args
 
 
 # TODO: Dump memory on hooked methods.
@@ -46,36 +69,35 @@ def dump_all(args: list) -> None:
     # Check for file override
     if os.path.exists(destination):
         click.secho('Destination file {dest} already exists'.format(dest=destination), fg='yellow', bold=True)
-        if not click.confirm('Continue append?'):
+        if not click.confirm('Continue, appending to the file?'):
             return
 
     # access type used when enumerating ranges
     access = 'rw-'
 
-    hook = generic_hook('memory/dump')
-    runner = FridaRunner(hook=hook)
-    api = runner.rpc_exports()
-
-    ranges = api.enumerate_ranges(access)
+    api = state_connection.get_api()
+    ranges = api.memory_list_ranges(access)
 
     total_size = sum([x['size'] for x in ranges])
     click.secho('Will dump {0} {1} images, totalling {2}'.format(
         len(ranges), access, sizeof_fmt(total_size)), fg='green', dim=True)
 
-    with click.progressbar(ranges, label='Preparing to dump images') as bar:
-
+    with click.progressbar(ranges) as bar:
         for image in bar:
             bar.label = 'Dumping {0} from base: {1}'.format(sizeof_fmt(image['size']), hex(int(image['base'], 16)))
 
-            # grab the (size) bytes starting at the (base_address)
-            dump = api.read_bytes(int(image['base'], 16), image['size'])
+            # catch and exception thrown while dumping.
+            # this could for a few reasons like if the protection
+            # changes or the range is reallocated
+            try:
+                # grab the (size) bytes starting at the (base_address)
+                dump = api.memory_dump(int(image['base'], 16), image['size'])
+            except Exception:
+                continue
 
             # append the results to the destination file
             with open(destination, 'ab') as f:
                 f.write(dump)
-
-    # Cleanup the script
-    runner.unload_script()
 
     click.secho('Memory dumped to file: {0}'.format(destination), fg='green')
 
@@ -97,24 +119,17 @@ def dump_from_base(args: list) -> None:
     memory_size = args[1]
     destination = args[2]
 
-    click.secho('Dumping {0} from {1} to {2}'.format(sizeof_fmt(int(memory_size)), base_address, destination),
-                fg='green', dim=True)
-
-    hook = generic_hook('memory/dump')
-    runner = FridaRunner(hook=hook)
-    api = runner.rpc_exports()
-
-    # grab the (size) bytes starting at the (base_address)
-    dump = api.read_bytes(int(base_address, 16), int(memory_size))
-
-    # Cleanup the script
-    runner.unload_script()
-
     # Check for file override
     if os.path.exists(destination):
         click.secho('Destination file {dest} already exists'.format(dest=destination), fg='yellow', bold=True)
         if not click.confirm('Override?'):
             return
+
+    click.secho('Dumping {0} from {1} to {2}'.format(sizeof_fmt(int(memory_size)), base_address, destination),
+                fg='green', dim=True)
+
+    api = state_connection.get_api()
+    dump = api.memory_dump(int(base_address, 16), int(memory_size))
 
     # append the results to the destination file
     with open(destination, 'wb') as f:
@@ -131,25 +146,39 @@ def list_modules(args: list = None) -> None:
         :return:
     """
 
-    hook = generic_hook('memory/list-modules')
-    runner = FridaRunner(hook=hook)
-    runner.run()
-
-    response = runner.get_last_message()
-
-    if not response.is_successful():
-        click.secho('Failed to list loaded modules in current process with error: {0}'.format(response.error_reason))
+    if _should_output_json(args) and len(args) < 2:
+        click.secho('Usage: memory list modules (--json <local destination>)', bold=True)
         return
 
-    data = []
-    for m in response.modules:
-        data.append(
-            [m['name'], m['base'], str(m['size']) + ' (' + sizeof_fmt(m['size']) + ')', pretty_concat(m['path'])])
+    if not _should_output_json(args):
+        click.secho('Save the output by adding `--json modules.json` to this command', dim=True)
 
-    click.secho(tabulate(data, headers=['Name', 'Base', 'Size', 'Path']))
+    api = state_connection.get_api()
+    modules = api.memory_list_modules()
+
+    if _should_output_json(args):
+        destination = args[args.index('--json') + 1]
+
+        click.secho('Writing modules as json to {0}...'.format(destination), dim=True)
+
+        with open(destination, 'w') as f:
+            f.write(json.dumps(modules, indent=2))
+
+        click.secho('Wrote modules to: {0}'.format(destination), fg='green')
+        return
+
+    # Just dump it to the screen
+    click.secho(tabulate(
+        [[
+            entry['name'],
+            entry['base'],
+            str(entry['size']) + ' (' + sizeof_fmt(entry['size']) + ')',
+            pretty_concat(entry['path']),
+        ] for entry in modules], headers=['Name', 'Base', 'Size', 'Path'],
+    ))
 
 
-def dump_exports(args: list) -> None:
+def list_exports(args: list) -> None:
     """
         Dumps the exported methods from a loaded module to screen.
 
@@ -157,28 +186,41 @@ def dump_exports(args: list) -> None:
         :return:
     """
 
+    if _should_output_json(args) and len(args) < 3:
+        click.secho('Usage: memory list exports <module name> (--json <local destination>)', bold=True)
+        return
+
+    if not _should_output_json(args):
+        click.secho('Save the output by adding `--json exports.json` to this command', dim=True)
+
     if len(clean_argument_flags(args)) <= 0:
         click.secho('Usage: memory list exports <module name>', bold=True)
         return
 
     module_to_list = args[0]
 
-    runner = FridaRunner()
-    runner.set_hook_with_data(
-        generic_hook('memory/list-exports'), module=module_to_list)
-    runner.run()
+    api = state_connection.get_api()
+    exports = api.memory_list_exports(module_to_list)
 
-    response = runner.get_last_message()
+    if _should_output_json(args):
+        destination = args[args.index('--json') + 1]
 
-    if not response.is_successful():
-        click.secho('Failed to list loaded modules in current process with error: {0}'.format(response.error_reason))
+        click.secho('Writing exports as json to {0}...'.format(destination), dim=True)
+
+        with open(destination, 'w') as f:
+            f.write(json.dumps(exports, indent=2))
+
+        click.secho('Wrote exports to: {0}'.format(destination), fg='green')
         return
 
-    data = []
-    for x in response.exports:
-        data.append([x['type'], x['name'], x['address']])
-
-    click.secho(tabulate(data, headers=['Type', 'Name', 'Address']))
+    # Just dump it to the screen
+    click.secho(tabulate(
+        [[
+            entry['type'],
+            entry['name'],
+            entry['address'],
+        ] for entry in exports], headers=['Type', 'Name', 'Address'],
+    ))
 
 
 def find_pattern(args: list) -> None:
@@ -190,7 +232,7 @@ def find_pattern(args: list) -> None:
     """
 
     if len(clean_argument_flags(args)) <= 0:
-        click.secho('Usage: memory search "<pattern eg: 41 41 41 ?? 41>" (--string)', bold=True)
+        click.secho('Usage: memory search "<pattern eg: 41 41 41 ?? 41>" (--string) (--offsets-only)', bold=True)
         return
 
     # if we got a string as input, convert it to hex
@@ -201,22 +243,14 @@ def find_pattern(args: list) -> None:
 
     click.secho('Searching for: {0}'.format(pattern), dim=True)
 
-    runner = FridaRunner()
-    runner.set_hook_with_data(generic_hook('memory/search'), pattern=pattern)
-    runner.run()
+    api = state_connection.get_api()
+    data = api.memory_search(pattern, _should_only_dump_offsets(args))
 
-    response = runner.get_last_message()
-
-    if not response.is_successful():
-        click.secho('Failed to search the current process with error: {0}'.format(response.error_reason))
-        return
-
-    data = response.data
-
-    if data and len(data) > 0:
+    if len(data) > 0:
         click.secho('Pattern matched at {0} addresses'.format(len(data)), fg='green')
-        for address in data:
-            click.secho(address)
+        if _should_only_dump_offsets(args):
+            for address in data:
+                click.secho(address)
 
     else:
         click.secho('Unable to find the pattern in any memory region')
@@ -239,18 +273,12 @@ def write(args: list) -> None:
     destination = args[0]
     pattern = args[1]
 
-    # TODO: Fix this method up to be python3 compatible
-
     if _is_string_input(args):
-        pattern = ' '.join(x.encode('hex') for x in args[0])
+        pattern = [ord(x) for x in pattern]
+    else:
+        pattern = [int(x, 16) for x in pattern.split(' ')]
 
-    # create a byte array we will eval in the template
-    pattern = '[{0}]'.format(','.join(['0x%02x' % int(x, 16) for x in pattern.split(' ')]))
     click.secho('Writing byte array: {0} to {1}'.format(pattern, destination), dim=True)
 
-    runner = FridaRunner()
-    runner.set_hook_with_data(
-        generic_hook('memory/write'),
-        destination=destination, pattern=pattern)
-
-    runner.run()
+    api = state_connection.get_api()
+    api.memory_write(destination, pattern)

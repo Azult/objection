@@ -1,0 +1,42 @@
+{
+  "name": "objection",
+  "version": "0.0.0",
+  "description": "Runtime Mobile Exploration",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "prepare": "npm run build",
+    "build": "frida-compile src/index.ts -o ../objection/agent.js -c",
+    "watch": "frida-compile src/index.ts -o ../objection/agent.js -w -c",
+    "lint": "tslint -c tslint.json 'src/**/*.ts'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sensepost/objection.git"
+  },
+  "keywords": [
+    "frida",
+    "runtime",
+    "mobile",
+    "security",
+    "objection"
+  ],
+  "author": "Leon Jacobs",
+  "license": "GPL-3.0",
+  "bugs": {
+    "url": "https://github.com/sensepost/objection/issues"
+  },
+  "homepage": "https://github.com/sensepost/objection#readme",
+  "dependencies": {
+    "frida-java-bridge": "^3",
+    "frida-objc-bridge": "^4",
+    "frida-screenshot": "^3",
+    "macho": "^1"
+  },
+  "devDependencies": {
+    "@types/frida-gum": "^15",
+    "@types/node": "^13",
+    "frida-compile": "^9",
+    "tslint": "^6"
+  }
+}

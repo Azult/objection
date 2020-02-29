@@ -3,8 +3,7 @@ import json
 import click
 from tabulate import tabulate
 
-from objection.utils.frida_transport import FridaRunner
-from objection.utils.templates import ios_hook
+from objection.state.connection import state_connection
 
 
 def _should_output_json(args: list) -> bool:
@@ -17,6 +16,18 @@ def _should_output_json(args: list) -> bool:
     """
 
     return len(args) > 0 and '--json' in args
+
+
+def _should_do_smart_decode(args: list) -> bool:
+    """
+        Checks if --smart is in the list of tokens received from the
+        command line.
+
+        :param args:
+        :return:
+    """
+
+    return len(args) > 0 and '--smart' in args
 
 
 def _has_minimum_flags_to_add_item(args: list) -> bool:
@@ -59,43 +70,51 @@ def dump(args: list = None) -> None:
     click.secho('Note: You may be asked to authenticate using the devices passcode or TouchID')
 
     if not _should_output_json(args):
-        click.secho('Get all of the attributes by adding `--json keychain.json` to this command', dim=True)
+        click.secho('Save the output by adding `--json keychain.json` to this command', dim=True)
 
-    click.secho('Reading the iOS keychain...', dim=True)
-    hook = ios_hook('keychain/dump')
-    runner = FridaRunner(hook=hook)
-    runner.run()
-
-    response = runner.get_last_message()
-
-    if not response.is_successful():
-        click.secho('Failed to get keychain items with error: {0}'.format(response.error_message), fg='red')
-        return
+    click.secho('Dumping the iOS keychain...', dim=True)
+    api = state_connection.get_api()
+    keychain = api.ios_keychain_list(_should_do_smart_decode(args))
 
     if _should_output_json(args):
         destination = args[1]
 
-        click.secho('Writing full keychain as json to {0}...'.format(destination), dim=True)
+        click.secho('Writing keychain as json to {0}...'.format(destination), dim=True)
 
         with open(destination, 'w') as f:
-            f.write(json.dumps(response.data, indent=2))
+            f.write(json.dumps(keychain, indent=2))
 
-        click.secho('Dumped full keychain to: {0}'.format(destination), fg='green')
+        click.secho('Dumped keychain to: {0}'.format(destination), fg='green')
         return
 
-    # refer to hooks/ios/keychain/dump.js for a key,value reference
+    # Just dump it to the screen
+    click.secho(tabulate(
+        [[
+            entry['create_date'],
+            entry['accessible_attribute'].replace('kSecAttrAccessible',
+                                                  '') if 'accessible_attribute' in entry else None,
+            entry['access_control'],
+            entry['item_class'].replace('kSecClassGeneric', ''),
+            entry['account'],
+            entry['service'],
+            entry['data']
+        ] for entry in keychain], headers=['Created', 'Accessible', 'ACL', 'Type', 'Account', 'Service', 'Data'],
+    ))
 
-    data = []
 
-    if response.data:
-        for entry in response.data:
-            data.append([entry['item_class'], entry['account'], entry['service'], entry['generic'], entry['data'], ])
+def dump_raw(args: list = None) -> None:
+    """
+        Dump the iOS keychain, but without any parsing.
+        The agent will output the entries it finds here.
 
-        click.secho('')
-        click.secho(tabulate(data, headers=['Class', 'Account', 'Service', 'Generic', 'Data']))
+        :param args:
+        :return:
+    """
 
-    else:
-        click.secho('No keychain data could be found', fg='yellow')
+    click.secho('Note: You may be asked to authenticate using the devices passcode or TouchID')
+    click.secho('Dumping the iOS keychain...', dim=True)
+    api = state_connection.get_api()
+    keychain = api.ios_keychain_list_raw()
 
 
 def clear(args: list = None) -> None:
@@ -106,16 +125,13 @@ def clear(args: list = None) -> None:
         :return:
     """
 
-    click.secho('Clearing the keychain...', dim=True)
-    hook = ios_hook('keychain/clear')
-    runner = FridaRunner(hook=hook)
-    runner.run()
-
-    response = runner.get_last_message()
-
-    if not response.is_successful():
-        click.secho('Failed to clear keychain items with error: {0}'.format(response.error_message), fg='red')
+    if not click.confirm('Are you sure you want to clear the iOS keychain?'):
         return
+
+    click.secho('Clearing the keychain...', dim=True)
+
+    api = state_connection.get_api()
+    api.ios_keychain_empty()
 
     click.secho('Keychain cleared', fg='green')
 
@@ -139,12 +155,8 @@ def add(args: list) -> None:
     click.secho('Key:       {0}'.format(key), dim=True)
     click.secho('Value:     {0}'.format(value), dim=True)
 
-    runner = FridaRunner()
-    runner.set_hook_with_data(ios_hook('keychain/add'))
-
-    api = runner.rpc_exports()
-
-    if api.add(key, value):
+    api = state_connection.get_api()
+    if api.ios_keychain_add(key, value):
         click.secho('Successfully added the keychain item', fg='green')
         return
 

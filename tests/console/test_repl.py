@@ -1,5 +1,6 @@
 import unittest
 from unittest import mock
+from unittest.mock import MagicMock
 
 from frida import TimedOutError
 
@@ -32,7 +33,7 @@ class TestRepl(unittest.TestCase):
         self.assertEqual(type(self.repl.prompt_tokens), list)
         self.assertEqual(len(self.repl.prompt_tokens), 0)
 
-        tokens = self.repl.get_prompt_tokens(None)
+        tokens = self.repl.get_prompt_message()
 
         # [(Token.Applicationname, 'unknown application'),
         # (Token.On, ''), (Token.Devicetype, ''), (Token.Version, ' '), (Token.Connection, '[usb] # ')]
@@ -45,7 +46,7 @@ class TestRepl(unittest.TestCase):
     def test_gets_prompt_tokens_after_setting_them(self):
         self.repl.set_prompt_tokens(('a', 'b', 'c', 'd'))
 
-        tokens = self.repl.get_prompt_tokens(None)
+        tokens = self.repl.get_prompt_message()
 
         self.assertEqual(tokens[0][1], 'a')
         self.assertEqual(tokens[1][1], ' on ')
@@ -133,9 +134,13 @@ class TestRepl(unittest.TestCase):
 
         self.assertEqual(help_file, expected_output)
 
+    @mock.patch('objection.utils.agent.Agent.inject')
+    @mock.patch('objection.utils.agent.Agent.unload')
     @mock.patch('objection.console.repl.get_device_info')
-    def test_hanldes_reconnects(self, get_device_info):
-        get_device_info.return_value = 'a', 'b', 'c', 'd'
+    def test_hanldes_reconnects(self, get_device_info, mock_unload, mock_inject):
+        mock_inject.return_value = None
+        mock_unload.return_type = None
+        get_device_info.return_value = ('a', 'b', 'c', 'd')
 
         with capture(self.repl.handle_reconnect, 'reconnect') as o:
             output = o
@@ -144,9 +149,14 @@ class TestRepl(unittest.TestCase):
                            'Reconnection successful!\n')
 
         self.assertEqual(output, expected_output)
+        self.assertTrue(get_device_info.called)
+        self.assertTrue(mock_unload.called)
+        self.assertTrue(mock_inject.called)
 
+    @mock.patch('objection.utils.agent.Agent.unload')
     @mock.patch('objection.console.repl.get_device_info')
-    def test_handles_reconnects_and_reports_failures(self, get_device_info):
+    def test_handles_reconnects_and_reports_failures(self, mock_unload, get_device_info):
+        mock_unload.return_type = None
         get_device_info.side_effect = TimedOutError()
 
         with capture(self.repl.handle_reconnect, 'reconnect') as o:
@@ -157,19 +167,19 @@ class TestRepl(unittest.TestCase):
 
         self.assertEqual(output, expected_output)
 
-    @mock.patch('objection.console.repl.prompt')
-    def test_starts_repl_and_exists_cleanly_with_banner(self, prompt):
-        prompt.return_value = 'exit'
+    def test_starts_repl_and_exists_cleanly_with_banner(self):
+        self.repl.session = MagicMock(name='session')
+        self.repl.session.prompt.return_value = 'exit'
 
         with capture(self.repl.start_repl, False) as o:
             output = o
 
         expected_output = ("""
-     _     _         _   _
- ___| |_  |_|___ ___| |_|_|___ ___
-| . | . | | | -_|  _|  _| | . |   |
-|___|___|_| |___|___|_| |_|___|_|_|
-        |___|(object)inject(ion) v{0}
+     _   _         _   _
+ ___| |_|_|___ ___| |_|_|___ ___
+| . | . | | -_|  _|  _| | . |   |
+|___|___| |___|___|_| |_|___|_|_|
+      |___|(object)inject(ion) v{0}
 
      Runtime Mobile Exploration
         by: @leonjza from @sensepost
@@ -179,9 +189,9 @@ Exiting...\n""".format(__version__))
 
         self.assertEqual(output, expected_output)
 
-    @mock.patch('objection.console.repl.prompt')
-    def test_starts_repl_and_exists_cleanly_with_banner_and_quiet_flag(self, prompt):
-        prompt.return_value = 'exit'
+    def test_starts_repl_and_exists_cleanly_with_banner_and_quiet_flag(self):
+        self.repl.session = MagicMock(name='session')
+        self.repl.session.prompt.return_value = 'exit'
 
         with capture(self.repl.start_repl, True) as o:
             output = o
@@ -190,22 +200,10 @@ Exiting...\n""".format(__version__))
 
         self.assertEqual(output, expected_output)
 
-    @mock.patch('objection.console.repl.prompt')
-    def test_starts_repl_and_catches_ctrl_c(self, prompt):
-        prompt.side_effect = KeyboardInterrupt()
-
-        with capture(self.repl.start_repl, True) as o:
-            output = o
-
-        expected_output = 'Exiting...\n'
-
-        self.assertRaises(KeyboardInterrupt)
-        self.assertEqual(output, expected_output)
-
-    @mock.patch('objection.console.repl.prompt')
+    @mock.patch('objection.console.repl.PromptSession')
     @mock.patch('objection.console.repl.Repl.run_command')
     def test_runs_commands_and_catches_exceptions(self, prompt, run_command):
-        prompt.return_value = 'ios keychain clear'
+        prompt.return_value.prompt.return_value = 'ios keychain clear'
         run_command.side_effect = TypeError()
 
         self.assertRaises(TypeError)

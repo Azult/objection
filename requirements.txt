@@ -1,9 +1,10 @@
 frida
-frida-tools
-prompt_toolkit>=1.0.15,<2.0.0
+frida-tools>=6.0.0
+prompt_toolkit>=3.0.3,<4.0.0
 click
-jinja2
 tabulate
 delegator.py
 requests
-jsbeautifier
+flask
+pygments
+litecli>=1.3.0
