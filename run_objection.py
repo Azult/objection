@@ -1,4 +1,4 @@
-#!/usr/bin/python3.8
+#!/Library/Frameworks/Python.framework/Versions/3.8/bin/python3.8
 # -*- coding: utf-8 -*-
 import re
 import sys

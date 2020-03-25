@@ -1,5 +1,6 @@
 import click
 import frida
+import re
 
 from objection.state.connection import state_connection
 from objection.utils.helpers import clean_argument_flags
@@ -369,7 +370,8 @@ def search_var(args: list) -> None:
     # loop the classes and check the methods
 
     for class_name in sorted(classes):
-        if class_filter and class_filter.lower() not in class_name.lower():
+        # if class_filter and class_filter.lower() not in class_name.lower():
+        if not len(re.findall(class_filter, class_name)):
             continue
 
         try:
@@ -379,7 +381,8 @@ def search_var(args: list) -> None:
                 check_method = method.split('(')[0].split(' ')[-1]
                 method = method.split('(')[0].split(' ')[-1]
                 if method_filter:
-                    if method_filter.lower() not in check_method.lower():
+                    # if method_filter.lower() not in check_method.lower():
+                    if not len(re.findall(method_filter, check_method)):
                         continue
                 print(method)
                 api.android_hooking_search_var_value(method,var_filter)
